@@ -34,14 +34,8 @@ app.post('/upload', upload.single('files'), async (req, res) => {
   fs.copyFileSync(file.path, chunkPath); // 将临时文件复制到最终位置  
   
   // 检查所有切片是否都已上传  
-  let allChunksUploaded = true;  
-  for (let i = 0; i < totalChunks; i++) {  
-    
-    if (!fs.existsSync(path.join(chunksDir, chunkName))) { 
-      allChunksUploaded = false;  
-      break;  
-    }  
-  }  
+  let existCount = fs.readdirSync(chunksDir).length
+  let allChunksUploaded = existCount == totalChunks 
   
   if (allChunksUploaded) {  
    
@@ -62,26 +56,42 @@ async function mergeChunks(
   finalFile,
   chunkName
 ) {  
-  return new Promise((resolve, reject) => {  
-
-    const writeStream = fs.createWriteStream(finalFile);  
-    writeStream.on('finish', resolve);  
-    writeStream.on('error', reject);  
-  
-    // 读取并合并所有切片到最终文件  
-    for (let i = 0; i < fs.readdirSync(chunksDir).length; i++) {  
-
-      const chunkPath = path.join(chunksDir, chunkName);  
-      const readStream = fs.createReadStream(chunkPath);  
-
-      readStream.pipe(writeStream, { end: false }); // 不在读取流结束时关闭写入流  
-
-      readStream.on('end', () => {  
-        fs.unlinkSync(chunkPath); // 删除已合并的切片文件  
-      });  
-    }  
-    writeStream.end(); // 所有切片都已管道传输后结束写入流  
-  });  
+    return new Promise((resolve, reject) => {
+        const writeStream = fs.createWriteStream(finalFile)
+        writeStream.on('finish', resolve)
+        writeStream.on('error', reject)
+    
+        // 读取所有切片文件名
+        const chunks = fs.readdirSync(chunksDir).sort((a, b) => {
+          // 确保按正确顺序合并文件
+          return Number(a.split('-')[0]) - Number(b.split('-')[0])
+        })
+    
+        // 使用异步函数按顺序处理每个切片
+        async function mergeChunks(chunks) {
+          for (const chunkName of chunks) {
+            const chunkPath = path.join(chunksDir, chunkName)
+    
+            // 使用 Promise 包装单个切片的处理
+            await new Promise((resolveChunk, rejectChunk) => {
+              const readStream = fs.createReadStream(chunkPath)
+    
+              readStream.on('end', () => {
+                fs.unlinkSync(chunkPath) // 删除已合并的切片文件
+                resolveChunk()
+              })
+    
+              readStream.on('error', rejectChunk)
+              readStream.pipe(writeStream, { end: false })
+            })
+          }
+    
+          writeStream.end() // 所有切片处理完后才结束写入流
+        }
+    
+        // 执行合并操作
+        mergeChunks(chunks).catch(reject)
+    }) 
 }  
   
 const PORT = 3001;  
