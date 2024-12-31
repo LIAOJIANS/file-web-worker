@@ -25,5 +25,7 @@ module.exports = {
       .options({ // 根据文档自定义配置项
 
       })
+      .end()
+      config.module.rule('js').exclude.add(/\.worker\.js$/)
   }  
 }
